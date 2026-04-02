@@ -1,5 +1,6 @@
 include( "glua-patches/globals.lua" )
 include( "glua-patches/client-menu-server.lua" )
+include( "glua-patches/cvars_performance.lua" )
 
 if SERVER then
     AddCSLuaFile( "glua-patches/client-menu-server.lua" )
