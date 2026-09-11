@@ -379,6 +379,18 @@ if CLIENT then
                 _G.SScale = _G.ScreenScale
             end
 
+            -- Deprecated aliases of ScrW/ScrH, still used by plenty of older addons.
+            -- Pointing them at the wrappers above gives them the same cache and the same guard.
+            local surface = _G.surface
+
+            if surface.ScreenWidth ~= nil then
+                surface.ScreenWidth = _G.ScrW
+            end
+
+            if surface.ScreenHeight ~= nil then
+                surface.ScreenHeight = _G.ScrH
+            end
+
         end
 
         -- Viewport tracking
