@@ -224,32 +224,23 @@ if CLIENT then
         local dir_path = "glua_patches"
         local file_path = "glua_patches/cvars.json"
 
-        -- Applied whenever the module is enabled.
-        local base_list = {
-            [ "studio_queue_mode" ] = "1",
-            [ "r_fastzreject" ] = "1"
-        }
-
-        -- Part of the multicore set ( gmod_mcore_test / mat_queue_mode / cl_threaded_bone_setup ).
-        -- Source defaults this to 0 and there is a long history of players being unable to launch
-        -- the game after turning it on, so this group is opt-in and off by default.
-        -- Recovery, if it ever happens: add +cl_threaded_bone_setup 0 to the launch options.
-        local multicore_list = {
-            [ "cl_threaded_bone_setup" ] = "1"
+        local convar_list = {
+            -- Source default is 0. Valve's own help text: "Use -1 to default to hardware
+            -- settings", which is the right call on modern GPUs.
+            [ "r_fastzreject" ] = "-1"
         }
 
         -- Deliberately not included:
-        --   r_queued_ropes  - already defaults to 1, forcing it does nothing.
-        --   r_sse2          - removed from the game in the September 2026 update.
-        --   snd_* / dsp_*   - the September 2026 update blocks the saved ones from Lua.
+        --   studio_queue_mode      - already defaults to 1, forcing it does nothing.
+        --   r_queued_ropes         - already defaults to 1, forcing it does nothing.
+        --   cl_threaded_bone_setup - part of the multicore set. History of launch crashes, and
+        --                            worse on the x86-64 / Chromium beta branch. Not worth it.
+        --   r_sse2                 - removed from the game in the September 2026 update.
+        --   snd_* / dsp_*          - the September 2026 update blocks the saved ones from Lua.
 
         ---@type ConVar
         ---@diagnostic disable-next-line: param-type-mismatch
         local gp_cvars_performance = CreateConVar( "gp_cvars_performance", "1", FCVAR_ARCHIVE, "Force a set of client performance convars. Set to 0 to restore your original values." )
-
-        ---@type ConVar
-        ---@diagnostic disable-next-line: param-type-mismatch
-        local gp_cvars_multicore = CreateConVar( "gp_cvars_multicore", "0", FCVAR_ARCHIVE, "Also force the multicore convars. Off by default, these have a history of launch crashes." )
 
         -- Returns the ConVar only if it exists and we are actually allowed to write to it.
         -- The September 2026 update marked more convars as cheats, so this check matters.
@@ -270,6 +261,11 @@ if CLIENT then
         end
 
         local function WriteBackup( saved )
+            if next( saved ) == nil then
+                file_Delete( file_path )
+                return
+            end
+
             if not file_IsDir( dir_path, "DATA" ) then
                 file_CreateDir( dir_path )
             end
@@ -279,17 +275,19 @@ if CLIENT then
 
         -- Only records a convar the first time we touch it. Without this guard a second run
         -- would back up the values we already forced, destroying the user's originals.
-        local function BackupGroup( list )
+        local function Apply()
             local saved, changed = ReadBackup(), false
 
-            for name in pairs( list ) do
-                if saved[ name ] == nil then
-                    local convar = GetWritable( name )
+            for name, value in pairs( convar_list ) do
+                local convar = GetWritable( name )
 
-                    if convar ~= nil then
+                if convar ~= nil then
+                    if saved[ name ] == nil then
                         saved[ name ] = Variable_GetString( convar )
                         changed = true
                     end
+
+                    RunConsoleCommand( name, value )
                 end
             end
 
@@ -298,54 +296,24 @@ if CLIENT then
             end
         end
 
-        local function ApplyGroup( list )
-            for name, value in pairs( list ) do
+        local function Restore()
+            local saved = ReadBackup()
+            if next( saved ) == nil then return end
+
+            for name, value in pairs( saved ) do
                 if GetWritable( name ) ~= nil then
                     RunConsoleCommand( name, value )
                 end
             end
-        end
 
-        -- Puts a group back and drops it from the backup, so it is recorded fresh next time.
-        local function RestoreGroup( list )
-            local saved, changed = ReadBackup(), false
-
-            for name in pairs( list ) do
-                local value = saved[ name ]
-
-                if value ~= nil then
-                    if GetWritable( name ) ~= nil then
-                        RunConsoleCommand( name, value )
-                    end
-
-                    saved[ name ] = nil
-                    changed = true
-                end
-            end
-
-            if not changed then return end
-
-            if next( saved ) == nil then
-                file_Delete( file_path )
-            else
-                WriteBackup( saved )
-            end
+            file_Delete( file_path )
         end
 
         local function Refresh()
             if Variable_GetBool( gp_cvars_performance ) then
-                BackupGroup( base_list )
-                ApplyGroup( base_list )
-
-                if Variable_GetBool( gp_cvars_multicore ) then
-                    BackupGroup( multicore_list )
-                    ApplyGroup( multicore_list )
-                else
-                    RestoreGroup( multicore_list )
-                end
+                Apply()
             else
-                RestoreGroup( base_list )
-                RestoreGroup( multicore_list )
+                Restore()
             end
         end
 
@@ -356,12 +324,10 @@ if CLIENT then
         end, PRE_HOOK )
 
         cvars.AddChangeCallback( "gp_cvars_performance", Refresh, "glua.Patches - ConVar performance" )
-        cvars.AddChangeCallback( "gp_cvars_multicore", Refresh, "glua.Patches - ConVar performance" )
 
         -- Manual escape hatch, if something goes wrong and you want everything back now.
         concommand.Add( "gp_cvars_restore", function()
-            RestoreGroup( base_list )
-            RestoreGroup( multicore_list )
+            Restore()
             RunConsoleCommand( "gp_cvars_performance", "0" )
         end, nil, "Restore the convar values gLua Patches changed." )
 
